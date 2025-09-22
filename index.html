@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
+  <title>Sudoku Festival – Archive (Top 9)</title>
+  <style>
+@import url('https://fonts.googleapis.com/css2?family=Lexend+Deca:wght@100..900&family=Roboto+Flex:opsz,wght@8..144,100..1000&display=swap');
+
+:root{
+  --red:#E7364E; --white:#fff; --blue:#9ED4FF;
+  --gap: 8px;          /* 숫자-기록 간격 */
+  --stroke: 2px;       /* 아웃라인 두께 */
+  --shadow: 0 4px 12px rgba(0,0,0,.18);
+}
+
+html,body{ width:100%; background:#fff; }
+body{
+  margin:0;
+  overflow:auto;                          /* ⬅ 스크롤 허용 */
+  font-family:"Lexend Deca", system-ui;
+  color:rgba(231,54,78,1.0);
+}
+
+/* 스크롤 가능한 캔버스 */
+#canvas{
+  position:relative;
+  width:100%;
+  height:190vh;                           /* ⬅ 세로 여유 공간 */
+}
+
+/* LAYERS: absolute로 바꿔서 스크롤 따라감 */
+.layer{ position:absolute; inset:0; pointer-events:none; }
+#bg1{ z-index:1; background:url('bg1.png') center/cover no-repeat; }
+#bg2-wrap{ z-index:3; display:flex; align-items:center; justify-content:center; margin:120px; padding-top: 230px;}
+#bg2{ width:900px; max-width:none; display:block; }
+#bg3{ z-index:4; background:url('bg3.png') right/contain no-repeat; margin:70px; }
+
+/* TAGLINE */
+.tagline{
+  position:fixed; left:50%; top:24px; transform:translateX(-50%);
+  z-index:8; color:var(--white);
+  font-weight:800; letter-spacing:.2px; padding:8px 14px;
+  background:var(--red); border-radius:10px; box-shadow:var(--shadow); pointer-events:none
+}
+
+/* STAGE */
+#stage{
+  position:absolute; inset:0;
+  z-index:6;
+  pointer-events:none;    /* 칩만 포인터 받도록 */
+}
+
+/* CHIP: 숫자 이미지 + 메타(이름/시간) 한 덩어리 */
+.chip{
+  position:fixed;
+  display:flex; align-items:center;
+  gap:var(--gap);
+  cursor:grab; touch-action:none;
+  pointer-events:auto; padding-left: 50px;   /* 드래그 가능 */
+}
+.chip.dragging{ cursor:grabbing; }
+
+.chip img.num{ width: calc(var(--scale, 1) * clamp(64px, 12vw, 85px));
+  height:auto; display:block;
+}
+
+/* 메타 텍스트: 숫자 오른쪽에 고정 배치 */
+.meta{
+  display:flex; flex-direction:column; gap:2px;
+  font-weight:600; line-height:1.1;
+  text-align:left;
+  /* OUTER STROKE */
+  color:rgba(231,54,78,1.0);
+            /* WebKit */
+  text-shadow:
+    1px  1px 0 #fff, -1px  1px 0 #fff,
+    1px -1px 0 #fff, -1px -1px 0 #fff,
+    0    2px 0 #fff,  0   -2px 0 #fff,
+    2px  0   0 #fff, -2px  0   0 #fff;                     /* Fallback */
+}
+.meta .name{ font-size:clamp(18px,2.4vw,22px); }
+.meta .time{ font-size:clamp(16px,2.0vw,18px); opacity:.95; }
+
+/* 힌트 */
+
+  </style>
+</head>
+<body>
+
+  
+
+  <div id="canvas">
+    <div id="bg1" class="layer"></div>
+    <div id="bg2-wrap" class="layer"><img id="bg2" src="bg2.png" alt="bg2"/></div>
+    <div id="bg3" class="layer"></div>
+    <div id="stage"></div>
+  </div>
+
+
+
+<script>
+/** CONFIG */
+const NUM_ASSETS = [
+  {rank:1, src:'n1.png'},
+  {rank:2, src:'n2.png'},
+  {rank:3, src:'n3.png'},
+  {rank:4, src:'n4.png'},
+  {rank:5, src:'n5.png'},
+  {rank:6, src:'n6.png'},
+  {rank:7, src:'n7.png'},
+  {rank:8, src:'n8.png'},
+  {rank:9, src:'n9.png'},
+];
+let ranking = [
+  {name:'Jayun', time:'3:23'},
+  {name:'Sudoku Master', time:'5:23'},
+  {name:'unknown', time:'6:19'},
+  {name:'—', time:'—'},
+  {name:'—', time:'—'},
+  {name:'—', time:'—'},
+  {name:'—', time:'—'},
+  {name:'—', time:'—'},
+  {name:'—', time:'—'},
+];
+
+/* ELEMENTS */
+const canvas = document.getElementById('canvas');
+const stage  = document.getElementById('stage');
+const bg2Wrap = document.getElementById('bg2-wrap');
+const bg2 = document.getElementById('bg2');
+
+const chips = [];
+
+/* BG2: 느린 부유 */
+let b2 = {x:0, y:0, vx:0.02, vy:0.015};
+function layoutBg2(){
+  // 캔버스 중앙 기준
+  const rect = canvas.getBoundingClientRect();
+  b2.x = rect.width * 0.5 - bg2.clientWidth * 0.5;
+  b2.y = rect.height * 0.5 - bg2.clientHeight * 0.5;
+}
+window.addEventListener('load', layoutBg2);
+window.addEventListener('resize', layoutBg2);
+
+/* TOP9 생성: 메타를 칩 내부에 넣음 → 간격 고정 */
+function createChips(){
+  stage.innerHTML = '';
+  chips.length = 0;
+
+  NUM_ASSETS.forEach((item, i) => {
+    const chipEl = document.createElement('div');
+    chipEl.className = 'chip';
+
+    // 초기 배치: 3x3 그리드
+    const col = i % 3;
+    const row = Math.floor(i / 3);
+    const startX = (5 + col*15) * window.innerWidth / 100;     // vw → px
+    const startY = (15 + row*22) * window.innerHeight / 100 + window.scrollY;
+
+    // 숫자
+    const img = new Image();
+    img.className = 'num';
+    img.src = item.src;
+    img.alt = 'rank ' + item.rank;
+if (item.rank === 4) {
+  img.style.setProperty('--scale', '1.3');  // 1.2~1.3 사이가 시각적으로 안정적
+}
+    // 메타
+    const meta = document.createElement('div');
+    meta.className = 'meta';
+    const name = document.createElement('div'); name.className = 'name'; name.textContent = ranking[i]?.name || '—';
+    const time = document.createElement('div'); time.className = 'time'; time.textContent = ranking[i]?.time || '—';
+    meta.append(name, time);
+
+    chipEl.append(img, meta);
+    stage.appendChild(chipEl);
+
+    const rect = chipEl.getBoundingClientRect();
+    const chip = {
+      el: chipEl, img, meta, name, time,
+      x: startX, y: startY,
+      vx: (Math.random()*0.05+0.015)*(Math.random()<.5?-1:1),
+      vy: (Math.random()*0.05+0.015)*(Math.random()<.5?-1:1)
+    };
+    chips.push(chip);
+    applyChipTransform(chip);
+    enableDrag(chip);
+  });
+}
+
+/* DRAG + 관성 (스크롤 좌표 반영) */
+function enableDrag(chip){
+  let dragging=false, lastT=0, lastX=0, lastY=0;
+  const el = chip.el;
+
+  const onPointerDown = (e)=>{
+    dragging=true; el.classList.add('dragging'); el.setPointerCapture(e.pointerId);
+    lastX = e.clientX; lastY = e.clientY + window.scrollY; // ⬅ 스크롤 반영
+    lastT = performance.now();
+    chip.vx = chip.vy = 0;
+  };
+  const onPointerMove = (e)=>{
+    if(!dragging) return;
+    const curX = e.clientX;
+    const curY = e.clientY + window.scrollY;               // ⬅ 스크롤 반영
+    const dx = curX - lastX, dy = curY - lastY;
+
+    chip.x += dx; chip.y += dy;
+    applyChipTransform(chip);
+
+    const now = performance.now();
+    const dt = Math.max(1, now - lastT);
+    chip.vx = dx / dt; chip.vy = dy / dt;
+
+    lastX = curX; lastY = curY; lastT = now;
+  };
+  const onPointerUp = ()=>{
+    dragging=false; el.classList.remove('dragging');
+  };
+
+  el.addEventListener('pointerdown', onPointerDown);
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', onPointerUp);
+}
+
+/* 화면/문서 경계 체크 (스크롤 캔버스 기준) */
+function applyChipTransform(chip){
+  const w = chip.el.offsetWidth, h = chip.el.offsetHeight;
+  const stageH = stage.offsetHeight || canvas.offsetHeight;   // 200vh
+  const stageW = stage.offsetWidth  || canvas.offsetWidth;
+
+  if(chip.x < 0){ chip.x=0; chip.vx=Math.abs(chip.vx); }
+  if(chip.y < 0){ chip.y=0; chip.vy=Math.abs(chip.vy); }
+  if(chip.x + w > stageW){ chip.x = stageW - w; chip.vx = -Math.abs(chip.vx); }
+  if(chip.y + h > stageH){ chip.y = stageH - h; chip.vy = -Math.abs(chip.vy); }
+
+  chip.el.style.transform = `translate3d(${chip.x}px, ${chip.y}px, 0)`;
+}
+
+/* 메인 루프 (더 강한 감쇠 + 미세 노이즈) */
+let last = performance.now();
+function tick(now){
+  const dt = Math.min(40, now - last); last = now;
+
+  // BG2 드리프트
+  b2.x += b2.vx*dt; b2.y += b2.vy*dt;
+  const w = bg2.clientWidth, h = bg2.clientHeight;
+  const rect = canvas.getBoundingClientRect();  // 스크롤 반영 폭/높이
+  const boundW = rect.width, boundH = canvas.offsetHeight;
+
+  if(b2.x < -w*0.2){ b2.x = -w*0.2; b2.vx = Math.abs(b2.vx); }
+  if(b2.y < -h*0.2){ b2.y = -h*0.2; b2.vy = Math.abs(b2.vy); }
+  if(b2.x + w*1.2 > boundW){ b2.x = boundW - w*1.2; b2.vx = -Math.abs(b2.vx); }
+  if(b2.y + h*1.2 > boundH){ b2.y = boundH - h*1.2; b2.vy = -Math.abs(b2.vy); }
+
+  bg2Wrap.style.transform = `translate3d(${b2.x}px, ${b2.y}px, 0)`;
+
+  // 칩 부유
+  for(const chip of chips){
+    chip.x += chip.vx*dt; chip.y += chip.vy*dt;
+    chip.vx *= 0.990; chip.vy *= 0.990;
+    chip.vx += (Math.random()-0.5)*0.0006; chip.vy += (Math.random()-0.5)*0.0006;
+    applyChipTransform(chip);
+  }
+
+  requestAnimationFrame(tick);
+}
+
+/* 랭킹 갱신 API */
+function updateRanking(newList){
+  ranking = newList.slice(0,9);
+  chips.forEach((chip,i)=>{
+    chip.name.textContent = ranking[i]?.name || '—';
+    chip.time.textContent = ranking[i]?.time || '—';
+  });
+}
+  /* ===== 여기서부터 추가 ===== */
+  function loadRecords(){
+    const raw = localStorage.getItem('sudokuRecords');
+    if(!raw) return [];
+    try{ return JSON.parse(raw); }catch(e){ return []; }
+  }
+  function fmt(sec){
+    const m = Math.floor(sec/60);
+    const s = sec%60;
+    return `${m}:${String(s).padStart(2,'0')}`;
+  }
+  function refreshRanking(){
+    const records = loadRecords();
+    records.sort((a,b)=>a.seconds - b.seconds);
+    const top9 = records.slice(0,9).map(r=>({
+      name: r.name,
+      time: fmt(r.seconds)
+    }));
+    updateRanking(top9);
+  }
+  window.addEventListener('load', ()=>{
+    refreshRanking();
+    window.addEventListener('storage', refreshRanking);
+  });
+  /* ===== 여기까지 추가 ===== */
+/* INIT */
+createChips();
+requestAnimationFrame(tick);
+window.addEventListener('resize', ()=>{
+  // 리사이즈 후 경계 다시 적용
+  chips.forEach(applyChipTransform);
+});
+document.addEventListener('visibilitychange', ()=>{
+  if(!document.hidden){ last = performance.now(); requestAnimationFrame(tick); }
+});
+</script>
+</body>
+</html>
