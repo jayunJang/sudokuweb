@@ -319,6 +319,12 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ last =
   let motionScore = 0;  // 0..1
   let focusScore = 0;   // 0..100
   let distractionScore = 0; // 0..100
+  
+  // 비디오 프레임 차이로 움직임 감지 (얼굴 인식 실패 시 대체 방법)
+  let prevVideoFrame = null;
+  let videoMotionScore = 0; // 비디오 프레임 차이 기반 움직임 점수
+  let motionCanvas = null; // 움직임 감지용 별도 캔버스
+  let motionCtx = null;
 
   function resizeLive(){
     const r = liveCanvas.getBoundingClientRect();
@@ -575,15 +581,61 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ last =
     requestAnimationFrame(mosaicLoop);
   }
 
+  // 비디오 프레임 차이로 움직임 감지 (얼굴 인식 실패 시 대체 방법)
+  function detectVideoMotion(){
+    if(!video || video.readyState < 2) return 0;
+    
+    const w = Math.min(160, video.videoWidth || 160);
+    const h = Math.min(90, video.videoHeight || 90);
+    
+    if(!motionCanvas || motionCanvas.width !== w || motionCanvas.height !== h){
+      motionCanvas = document.createElement('canvas');
+      motionCanvas.width = w;
+      motionCanvas.height = h;
+      motionCtx = motionCanvas.getContext('2d');
+    }
+    
+    motionCtx.drawImage(video, 0, 0, w, h);
+    const imageData = motionCtx.getImageData(0, 0, w, h);
+    const data = imageData.data;
+    
+    if(!prevVideoFrame){
+      prevVideoFrame = new Uint8Array(data);
+      return 0;
+    }
+    
+    // 프레임 차이 계산
+    let diff = 0;
+    for(let i = 0; i < data.length; i += 4){
+      const gray = data[i] * 0.299 + data[i+1] * 0.587 + data[i+2] * 0.114;
+      const prevGray = prevVideoFrame[i] * 0.299 + prevVideoFrame[i+1] * 0.587 + prevVideoFrame[i+2] * 0.114;
+      diff += Math.abs(gray - prevGray);
+    }
+    
+    prevVideoFrame = new Uint8Array(data);
+    const diffNorm = clamp(diff / (w * h * 255), 0, 1);
+    return diffNorm;
+  }
+
   function updateMetrics(landmarks){
+    // 얼굴이 감지되지 않을 때 비디오 프레임 차이로 움직임 감지
     if(!Array.isArray(landmarks) || landmarks.length === 0){
+      const videoMotion = detectVideoMotion();
+      videoMotionScore = videoMotionScore * 0.7 + videoMotion * 0.3;
+      
+      // 비디오 움직임을 motionScore에 반영 (얼굴 인식 실패 시에도 움직임 감지)
       const prevMotionScore = motionScore;
-      motionScore = motionScore * 0.9;
-      if(Math.abs(motionScore - prevMotionScore) > 0.01){
+      const combinedMotion = videoMotionScore * 2; // 민감도 증가
+      motionScore = motionScore * 0.95 + clamp(combinedMotion, 0, 1) * 0.05; // 감소 속도 느리게
+      
+      if(Math.abs(motionScore - prevMotionScore) > 0.001){
         updateGridSize();
       }
       focusScore = Math.max(0, focusScore - 1);
       distractionScore = Math.max(0, distractionScore - 1);
+      motionV.textContent = motionScore.toFixed(2) + ' (video)';
+      focusV.textContent = String(focusScore);
+      distV.textContent = String(distractionScore);
       return;
     }
 
@@ -612,9 +664,10 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ last =
     const lowerLip = landmarks[14];
     const mouthOpen = clamp(Math.abs(upperLip.y - lowerLip.y) / (eyeDx + 1e-5), 0, 1);
 
-    const moveNorm = clamp(map(avgMove, 0.001, 0.01, 0, 1), 0, 1);
+    // 움직임 감지 임계값 조정 (더 민감하게)
+    const moveNorm = clamp(map(avgMove, 0.0005, 0.008, 0, 1), 0, 1);
     const prevMotionScore = motionScore;
-    motionScore = motionScore*0.85 + moveNorm*0.15;
+    motionScore = motionScore*0.8 + moveNorm*0.2; // 움직임 반영 비율 증가
 
     // motionScore가 변경되면 그리드 크기 업데이트 (매번 체크)
     if(Math.abs(motionScore - prevMotionScore) > 0.001){
@@ -641,7 +694,8 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ last =
       resizeLive();
 
       const faceMesh = new FaceMesh({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}` });
-      faceMesh.setOptions({ maxNumFaces: 2, refineLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+      // 아이패드에서도 잘 작동하도록 임계값 낮춤
+      faceMesh.setOptions({ maxNumFaces: 2, refineLandmarks: true, minDetectionConfidence: 0.3, minTrackingConfidence: 0.3 });
       faceMesh.onResults((res)=>{
         const faces = res.multiFaceLandmarks || [];
         if(faces[0]) updateMetrics(faces[0]); else updateMetrics(null);
