@@ -22,14 +22,14 @@ body{
   color:rgba(231,54,78,1.0);
 }
 
-/* 스크롤 가능한 캔버스 *//
+/* 스크롤 가능한 캔버스 */
 #canvas{ position:relative; width:100%; height:190vh; }
 
 /* LAYERS */
 .layer{ position:absolute; inset:0; pointer-events:none; }
 #bg1{ z-index:1; background:url('bg1.png') center/cover no-repeat; }
-#bg2-wrap{ z-index:3; display:flex; align-items:center; justify-content:center; margin:120px; padding-top:230px;}
-#bg2{ width:900px; max-width:none; display:block; }
+#bg2-wrap{ z-index:3; display:flex; align-items:center; justify-content:center; margin:120px; padding-top:230px; opacity:1; visibility:visible;}
+#bg2{ width:900px; max-width:none; display:block; opacity:1; visibility:visible; }
 #bg3{ z-index:4; background:url('bg3.png') right/contain no-repeat; margin:70px; }
 
 /* TAGLINE */
@@ -40,30 +40,6 @@ body{
   background:var(--red); border-radius:10px; box-shadow:var(--shadow); pointer-events:none
 }
 
-/* STAGE */
-#stage{ position:absolute; inset:0; z-index:6; pointer-events:none; }
-
-/* CHIP */
-.chip{
-  position:fixed;
-  display:flex; align-items:center; gap:var(--gap);
-  cursor:grab; touch-action:none; pointer-events:auto; padding-left:50px;
-}
-.chip.dragging{ cursor:grabbing; }
-.chip img.num{ width: calc(var(--scale, 1) * clamp(64px, 12vw, 85px)); height:auto; display:block; }
-
-/* META */
-.meta{
-  display:flex; flex-direction:column; gap:2px; font-weight:600; line-height:1.1; text-align:left;
-  color:rgba(231,54,78,1.0);
-  text-shadow:
-    1px  1px 0 #fff, -1px  1px 0 #fff,
-    1px -1px 0 #fff, -1px -1px 0 #fff,
-    0    2px 0 #fff,  0   -2px 0 #fff,
-    2px  0   0 #fff, -2px  0   0 #fff;
-}
-.meta .name{ font-size:clamp(18px,2.4vw,22px); }
-.meta .time{ font-size:clamp(16px,2.0vw,18px); opacity:.95; }
 
 .hud{
   position:fixed; left:70%; top:50%; transform:translate(-50%,-50%);
@@ -87,7 +63,6 @@ video#cam{ display:none; }
     <div id="bg1" class="layer"></div>
     <div id="bg2-wrap" class="layer"><img id="bg2" src="bg2.png" alt="bg2"/></div>
     <div id="bg3" class="layer"></div>
-    <div id="stage"></div>
   </div>
 
   <!-- 중앙 라이브 카메라 + 모자이크 렌더 캔버스 -->
@@ -107,98 +82,39 @@ video#cam{ display:none; }
   <button id="bgToggle" style="position:fixed; top:65px; left:70px; z-index:10; background:var(--red); border:none; border-radius:100px;font-family: Lexend Deca, system-ui; color: white;"></button>
 
 <script>
-/** CONFIG */
-const NUM_ASSETS = [
-  {rank:1, src:'n1.png'},{rank:2, src:'n2.png'},{rank:3, src:'n3.png'},
-  {rank:4, src:'n4.png'},{rank:5, src:'n5.png'},{rank:6, src:'n6.png'},
-  {rank:7, src:'n7.png'},{rank:8, src:'n8.png'},{rank:9, src:'n9.png'},
-];
-let ranking = Array.from({length:9}, ()=>({name:'—', time:'—'}));
-
 /* ELEMENTS */
 const canvas = document.getElementById('canvas');
-const stage  = document.getElementById('stage');
 const bg2Wrap = document.getElementById('bg2-wrap');
 const bg2 = document.getElementById('bg2');
-const chips = [];
 
 /* BG2 */
 let b2 = {x:0, y:0, vx:0.02, vy:0.015};
 function layoutBg2(){
   const rect = canvas.getBoundingClientRect();
-  b2.x = rect.width * 0.5 - bg2.clientWidth * 0.5;
-  b2.y = rect.height * 0.5 - bg2.clientHeight * 0.5;
+  // 이미지가 로드되었는지 확인
+  if(bg2.complete && bg2.naturalWidth > 0){
+    b2.x = rect.width * 0.5 - bg2.clientWidth * 0.5;
+    b2.y = rect.height * 0.5 - bg2.clientHeight * 0.5;
+  } else {
+    // 이미지가 아직 로드되지 않았으면 기본값 설정
+    b2.x = rect.width * 0.5;
+    b2.y = rect.height * 0.5;
+  }
 }
-window.addEventListener('load', layoutBg2);
+// 이미지 로드 완료 후에도 레이아웃 재설정
+bg2.addEventListener('load', ()=>{
+  layoutBg2();
+  // 초기 transform 설정
+  bg2Wrap.style.transform = `translate3d(${b2.x}px, ${b2.y}px, 0)`;
+});
+window.addEventListener('load', ()=>{
+  layoutBg2();
+  // 초기 transform 설정
+  if(bg2.complete && bg2.naturalWidth > 0){
+    bg2Wrap.style.transform = `translate3d(${b2.x}px, ${b2.y}px, 0)`;
+  }
+});
 window.addEventListener('resize', layoutBg2);
-
-/* CHIPS */
-function createChips(){
-  stage.innerHTML = ''; chips.length = 0;
-  NUM_ASSETS.forEach((item, i) => {
-    const chipEl = document.createElement('div');
-    chipEl.className = 'chip';
-    const col = i % 3, row = Math.floor(i / 3);
-    const startX = (5 + col*30) * window.innerWidth / 100;
-    const startY = (15 + row*30) * window.innerHeight / 100 + window.scrollY;
-
-    const img = new Image();
-    img.className = 'num'; img.src = item.src; img.alt = 'rank ' + item.rank;
-    if (item.rank === 4) img.style.setProperty('--scale', '1.2');
-
-    const meta = document.createElement('div'); meta.className = 'meta';
-    const name = document.createElement('div'); name.className = 'name'; name.textContent = ranking[i]?.name || '—';
-    const time = document.createElement('div'); time.className = 'time'; time.textContent = ranking[i]?.time || '—';
-    meta.append(name, time);
-    chipEl.append(img, meta);
-    stage.appendChild(chipEl);
-
-    const chip = { el: chipEl, img, meta, name, time,
-      x:startX, y:startY,
-      vx:(Math.random()*0.05+0.015)*(Math.random()<.5?-1:1),
-      vy:(Math.random()*0.05+0.015)*(Math.random()<.5?-1:1)
-    };
-    chips.push(chip);
-    applyChipTransform(chip);
-    enableDrag(chip);
-  });
-}
-
-/* DRAG */
-function enableDrag(chip){
-  let dragging=false, lastT=0, grabDX=0, grabDY=0, prevX=0, prevY=0;
-  const el = chip.el;
-
-  const onPointerDown = (e)=>{
-    dragging=true; chip.dragging=true; el.classList.add('dragging'); el.setPointerCapture(e.pointerId);
-    const rect = el.getBoundingClientRect();
-    grabDX = e.clientX - rect.left; grabDY = e.clientY - rect.top;
-    prevX = chip.x; prevY = chip.y; lastT = performance.now(); chip.vx = chip.vy = 0;
-  };
-  const onPointerMove = (e)=>{
-    if(!dragging) return;
-    chip.x = e.clientX - grabDX; chip.y = e.clientY - grabDY;
-    applyChipTransform(chip);
-    const now = performance.now(), dt = Math.max(1, now - lastT);
-    chip.vx = (chip.x - prevX) / dt; chip.vy = (chip.y - prevY) / dt;
-    prevX = chip.x; prevY = chip.y; lastT = now;
-  };
-  const onPointerUp = ()=>{ dragging=false; chip.dragging=false; el.classList.remove('dragging'); };
-  el.addEventListener('pointerdown', onPointerDown);
-  window.addEventListener('pointermove', onPointerMove);
-  window.addEventListener('pointerup', onPointerUp);
-}
-
-/* BOUNDS */
-function applyChipTransform(chip){
-  const w = chip.el.offsetWidth, h = chip.el.offsetHeight;
-  const stageW = window.innerWidth, stageH = window.innerHeight;
-  if (chip.x < 0) chip.x = 0;
-  if (chip.y < 0) chip.y = 0;
-  if (chip.x + w > stageW) chip.x = stageW - w;
-  if (chip.y + h > stageH) chip.y = stageH - h;
-  chip.el.style.transform = `translate3d(${chip.x}px, ${chip.y}px, 0)`;
-}
 
 /* TICK */
 let last = performance.now();
@@ -214,23 +130,12 @@ function tick(now){
   if(b2.y + h*1.2 > boundH){ b2.y = boundH - h*1.2; b2.vy = -Math.abs(b2.vy); }
   bg2Wrap.style.transform = `translate3d(${b2.x}px, ${b2.y}px, 0)`;
 
-  for(const chip of chips){
-    chip.x += chip.vx*dt; chip.y += chip.vy*dt;
-    chip.vx *= 0.990; chip.vy *= 0.990;
-    chip.vx += (Math.random()-0.5)*0.0006; chip.vy += (Math.random()-0.5)*0.0006;
-    applyChipTransform(chip);
-  }
-  resolveCollisions();
   requestAnimationFrame(tick);
 }
 
 /* UPDATE RANKING (DOM) - 기존 UI는 사용하지 않음 (호출 제거) */
 function updateRanking(newList){
-  ranking = newList.slice(0,9);
-  chips.forEach((chip,i)=>{
-    chip.name.textContent = ranking[i]?.name || '—';
-    chip.time.textContent = ranking[i]?.time || '—';
-  });
+  // 부유하는 숫자 UI 제거됨
 }
 
 /* ===== 서버에서 Top9 불러오기 ===== */
@@ -385,43 +290,15 @@ function startVersionWatch(){
 
 /* ===== 서버 연동 끝 ===== */
 
-/* INIT (배경만 유지) */
+/* INIT */
+layoutBg2();
+// 초기 transform 설정
+if(bg2.complete && bg2.naturalWidth > 0){
+  bg2Wrap.style.transform = `translate3d(${b2.x}px, ${b2.y}px, 0)`;
+}
 requestAnimationFrame(tick);
 
-
-window.addEventListener('resize', ()=>{ chips.forEach(applyChipTransform); });
 document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ last = performance.now(); requestAnimationFrame(tick); }});
-
-/* COLLISIONS */
-function resolveCollisions(){
-  const bounce = 0.4;
-  for(let i=0;i<chips.length;i++){
-    for(let j=i+1;j<chips.length;j++){
-      const a=chips[i], b=chips[j];
-      const aw=a.el.offsetWidth, ah=a.el.offsetHeight;
-      const bw=b.el.offsetWidth, bh=b.el.offsetHeight;
-      const overlapX=(a.x < b.x + bw) && (a.x + aw > b.x);
-      const overlapY=(a.y < b.y + bh) && (a.y + ah > b.y);
-      if(!(overlapX && overlapY)) continue;
-
-      const axc=a.x+aw/2, ayc=a.y+ah/2, bxc=b.x+bw/2, byc=b.y+bh/2;
-      const dx=axc-bxc, dy=ayc-byc;
-      const px=aw/2+bw/2 - Math.abs(dx), py=ah/2+bh/2 - Math.abs(dy);
-      const moveA=!a.dragging, moveB=!b.dragging;
-
-      if(px < py){
-        const sx = dx < 0 ? -px : px;
-        if(moveA && moveB){ a.x += sx/2; b.x -= sx/2; } else if(moveA){ a.x += sx; } else if(moveB){ b.x -= sx; }
-        const avx=a.vx, bvx=b.vx; if(moveA) a.vx=bvx*bounce; if(moveB) b.vx=avx*bounce;
-      }else{
-        const sy = dy < 0 ? -py : py;
-        if(moveA && moveB){ a.y += sy/2; b.y -= sy/2; } else if(moveA){ a.y += sy; } else if(moveB){ b.y -= sy; }
-        const avy=a.vy, bvy=b.vy; if(moveA) a.vy=bvy*bounce; if(moveB) b.vy=avy*bounce;
-      }
-      applyChipTransform(a); applyChipTransform(b);
-    }
-  }
-}
 
 /* ===== 중앙 라이브: Face Mesh + 숫자 모자이크 ===== */
 (()=>{
