@@ -79,7 +79,7 @@ video#cam{ display:none; }
     <span style="margin-left:20px;">distraction</span>&nbsp;&nbsp;<span class="v" id="distV">0</span>
   </div>
 
-  <button id="bgToggle" style="position:fixed; top:65px; left:70px; z-index:10; background:var(--red); border:none; border-radius:100px;font-family: Lexend Deca, system-ui; color: white;"></button>
+  <button id="bgToggle" style="position:fixed; top:65px; left:70px; z-index:10; background:var(--red); border:none; border-radius:100px;font-family: Lexend Deca, system-ui; color: white;">Hide Background</button>
 
 <script>
 /* ELEMENTS */
@@ -386,6 +386,8 @@ document.addEventListener('visibilitychange', ()=>{ if(!document.hidden){ last =
   document.addEventListener('DOMContentLoaded', ()=>{
     const bgToggleBtn = document.getElementById('bgToggle');
     if(bgToggleBtn){
+      // 초기 텍스트 설정
+      bgToggleBtn.textContent = showBackground ? 'Hide Background' : 'Show Background';
       bgToggleBtn.addEventListener('click', ()=>{
         showBackground = !showBackground;
         bgToggleBtn.textContent = showBackground ? 'Hide Background' : 'Show Background';
