@@ -42,9 +42,10 @@ body{
 
 
 .hud{
-  position:fixed; left:70%; top:50%; transform:translate(-50%,-50%);
-  z-index:6; width:min(100vw, 1000px); aspect-ratio:16/9;color: #E7364E;
+  position:fixed; left:50%; top:calc(50% - 550px); transform:translateX(-50%);
+  z-index:7; width:min(100vw, 1800px); color: #E7364E;
   display:flex; flex-direction:row; place-items:left ; pointer-events:none;
+  justify-content:center; padding:10px 0;
 }
 /* 중앙 실시간 영역 */
 #live-wrap{
